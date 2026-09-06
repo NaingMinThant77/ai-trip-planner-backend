@@ -48,7 +48,9 @@ export class UsersService {
    * Returns the password hash alongside the user. Only `AuthService` may call this —
    * everything else uses the `findSafe*` methods.
    */
-  async findWithHashByEmail(email: string): Promise<(SafeUser & { passwordHash: string }) | null> {
+  async findWithHashByEmail(
+    email: string,
+  ): Promise<(SafeUser & { passwordHash: string | null }) | null> {
     return this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       select: { ...safeUserSelect, passwordHash: true },
@@ -62,6 +64,36 @@ export class UsersService {
         name: input.name,
         passwordHash: input.passwordHash,
       },
+      select: safeUserSelect,
+    });
+  }
+
+  async findSafeByGoogleId(googleId: string): Promise<SafeUser | null> {
+    return this.prisma.user.findUnique({ where: { googleId }, select: safeUserSelect });
+  }
+
+  async createFromGoogle(input: {
+    email: string;
+    name: string;
+    googleId: string;
+  }): Promise<SafeUser> {
+    return this.prisma.user.create({
+      data: {
+        email: input.email.toLowerCase(),
+        name: input.name,
+        googleId: input.googleId,
+        // No password: this account can only ever be reached through Google.
+        passwordHash: null,
+      },
+      select: safeUserSelect,
+    });
+  }
+
+  /** Attaches Google to an account that already signed up with an email and password. */
+  async linkGoogleId(id: string, googleId: string): Promise<SafeUser> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { googleId },
       select: safeUserSelect,
     });
   }

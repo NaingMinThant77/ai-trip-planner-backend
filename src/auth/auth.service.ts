@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { SafeUser, UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GoogleProfile } from './google-oauth.service';
 
 export type JwtPayload = { sub: string; email: string };
 export type AuthResponse = { accessToken: string; user: SafeUser };
@@ -36,10 +37,18 @@ export class AuthService {
   async login(dto: LoginDto): Promise<AuthResponse> {
     const record = await this.users.findWithHashByEmail(dto.email);
 
-    // Compare against a dummy hash when the user is missing so that a wrong email and a
-    // wrong password take the same time and cannot be told apart by timing.
+    // Compare against a dummy hash when the user is missing — or has no password because the
+    // account came from Google — so every failure takes the same time and cannot be told
+    // apart by timing.
     const hash = record?.passwordHash ?? '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
     const matches = await bcrypt.compare(dto.password, hash);
+
+    // Said only after the comparison above, so the timing of this branch matches the others.
+    // It does leak that the address exists, which is the accepted cost of not stranding a
+    // Google user at "incorrect password" forever.
+    if (record && record.passwordHash === null) {
+      throw new UnauthorizedException('That account uses Google. Continue with Google instead.');
+    }
 
     if (!record || !matches) {
       throw new UnauthorizedException('Incorrect email or password.');
@@ -47,6 +56,27 @@ export class AuthService {
 
     const { passwordHash: _passwordHash, ...user } = record;
     return { accessToken: this.sign(user), user };
+  }
+
+  /**
+   * Called only after `GoogleOAuthService` has verified the profile came from Google.
+   * Matching on a verified email is what lets someone who signed up with a password later
+   * use the Google button and land in the same account rather than a duplicate.
+   */
+  async signInWithGoogle(profile: GoogleProfile): Promise<AuthResponse> {
+    const byGoogleId = await this.users.findSafeByGoogleId(profile.googleId);
+    if (byGoogleId) {
+      return { accessToken: this.sign(byGoogleId), user: byGoogleId };
+    }
+
+    const byEmail = await this.users.findSafeByEmail(profile.email);
+    if (byEmail) {
+      const linked = await this.users.linkGoogleId(byEmail.id, profile.googleId);
+      return { accessToken: this.sign(linked), user: linked };
+    }
+
+    const created = await this.users.createFromGoogle(profile);
+    return { accessToken: this.sign(created), user: created };
   }
 
   private sign(user: SafeUser): string {

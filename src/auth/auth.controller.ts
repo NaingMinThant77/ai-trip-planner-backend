@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Query,
   Redirect,
@@ -14,6 +15,7 @@ import { JwtService } from '@nestjs/jwt';
 import { SafeUser } from '../users/users.service';
 import { AuthResponse, AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { GoogleStartDto } from './dto/google-start.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -54,6 +56,20 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: SafeUser): SafeUser {
     return user;
+  }
+
+  /**
+   * The existing token stays valid — it carries no password material, and rotating it would
+   * mean re-issuing on every device. Revocation is decision #5's unresolved problem.
+   */
+  @Patch('password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @CurrentUser() user: SafeUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<void> {
+    await this.auth.changePassword(user.id, dto);
   }
 
   /**

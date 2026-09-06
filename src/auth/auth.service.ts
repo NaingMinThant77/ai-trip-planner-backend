@@ -1,7 +1,13 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { SafeUser, UsersService } from '../users/users.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { GoogleProfile } from './google-oauth.service';
@@ -77,6 +83,33 @@ export class AuthService {
 
     const created = await this.users.createFromGoogle(profile);
     return { accessToken: this.sign(created), user: created };
+  }
+
+  /**
+   * The current password is required even though the caller already holds a valid JWT: a
+   * stolen phone should not be enough to lock the owner out of their own account.
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const record = await this.users.findWithHashById(userId);
+    if (!record) throw new UnauthorizedException('That account no longer exists.');
+
+    if (record.passwordHash === null) {
+      // Nothing to compare against. Setting a first password here would turn a Google-only
+      // account into one that can also be reached with a password, which is a different
+      // feature (and needs a verified-email step to be safe).
+      throw new BadRequestException(
+        'That account signs in with Google, so it has no password to change.',
+      );
+    }
+
+    const matches = await bcrypt.compare(dto.currentPassword, record.passwordHash);
+    if (!matches) throw new UnauthorizedException('That is not your current password.');
+
+    if (await bcrypt.compare(dto.newPassword, record.passwordHash)) {
+      throw new BadRequestException('Your new password must be different from the current one.');
+    }
+
+    await this.users.updatePasswordHash(userId, await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS));
   }
 
   private sign(user: SafeUser): string {

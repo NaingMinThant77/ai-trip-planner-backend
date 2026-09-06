@@ -53,8 +53,18 @@ export class GoogleOAuthService {
    * `OAUTH_PUBLIC_URL` pointed at an https tunnel. See memory/08-environment.md.
    */
   get redirectUri(): string {
-    const base = this.config.get<string>('OAUTH_PUBLIC_URL') ?? 'http://localhost:3000';
-    return `${base.replace(/\/+$/, '')}${CALLBACK_PATH}`;
+    const configured = this.config.get<string>('OAUTH_PUBLIC_URL') ?? 'http://localhost:3000';
+    let base = configured.replace(/\/+$/, '');
+
+    // OAUTH_PUBLIC_URL is an *origin*, but the Google console asks for the full callback URL,
+    // so it is easy to paste that here instead. Left alone that appends CALLBACK_PATH twice
+    // and Google answers `redirect_uri_mismatch` — an error that names neither the variable
+    // nor the duplication. Cost a debugging session on 2026-09-06.
+    if (base.endsWith(CALLBACK_PATH)) {
+      base = base.slice(0, -CALLBACK_PATH.length);
+    }
+
+    return `${base}${CALLBACK_PATH}`;
   }
 
   /**

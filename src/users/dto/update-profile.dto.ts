@@ -1,4 +1,12 @@
-import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -6,6 +14,15 @@ export class UpdateProfileDto {
   @MinLength(2)
   @MaxLength(80)
   name?: string;
+
+  /**
+   * Changing this changes what you sign in with. Uniqueness is asserted in the service, which
+   * returns a 409 naming the clash rather than letting the unique index surface as a P2002.
+   */
+  @IsOptional()
+  @IsEmail({}, { message: 'Enter a valid email address.' })
+  @MaxLength(160)
+  email?: string;
 
   @IsOptional()
   @IsString()

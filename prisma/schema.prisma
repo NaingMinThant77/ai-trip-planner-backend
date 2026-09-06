@@ -27,12 +27,43 @@ model User {
   homeCity     String?
   /// JSON-encoded string[] of travel interests. Seeds personalised suggestions.
   interests    String   @default("[]")
+  /// Short code other people type to add this user as family. Null until the profile is
+  /// first read — minted lazily by `UsersService.ensureInviteCode`.
+  inviteCode   String?  @unique
+  /// Cloudinary secure URL of the profile photo. Null means the UI falls back to initials.
+  avatarUrl    String?
+  /// Cloudinary public_id. Kept so replacing a photo can delete the one it replaced —
+  /// without it the old image stays in the account forever.
+  avatarPublicId String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   trips         Trip[]
   photos        TripPhoto[]
   conversations AgentConversation[]
+  /// People this user added to their own family list.
+  family        FamilyMember[]      @relation("FamilyOwner")
+  /// Lists this user appears in, because someone else entered their invite code.
+  familyOf      FamilyMember[]      @relation("FamilyMemberUser")
+}
+
+/// Someone the owner keeps on hand so any trip can be shared in one tap.
+/// Deliberately **one-directional** (decision #19): adding someone does not add you to
+/// their list, so learning a code never puts you inside that person's own family list.
+model FamilyMember {
+  id       String   @id @default(cuid())
+  /// The user who typed the invite code.
+  ownerId  String
+  /// The user whose invite code was typed.
+  memberId String
+  addedAt  DateTime @default(now())
+
+  owner  User @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  member User @relation("FamilyMemberUser", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, memberId])
+  @@index([ownerId])
+  @@index([memberId])
 }
 
 model Trip {

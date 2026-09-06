@@ -5,8 +5,10 @@ import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { ExploreModule } from './explore/explore.module';
+import { FamilyModule } from './family/family.module';
 import { HealthController } from './health/health.controller';
 import { ItineraryModule } from './itinerary/itinerary.module';
+import { MediaModule } from './media/media.module';
 import { PackingModule } from './packing/packing.module';
 import { PhotosModule } from './photos/photos.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -29,6 +31,8 @@ import { UsersModule } from './users/users.module';
     BookingsModule,
     SharingModule,
     ExploreModule,
+    FamilyModule,
+    MediaModule,
   ],
   controllers: [HealthController],
 })

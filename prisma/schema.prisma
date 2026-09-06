@@ -1,0 +1,232 @@
+// Postgres (Supabase). Enums and arrays are still String columns — that is a leftover from the
+// original SQLite design (decision #2), not a Postgres constraint. See memory/04-data-model.md
+// for what could now be tightened, and #13 for why the move happened.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Runtime connection. Use Supabase's TRANSACTION pooler (port 6543) + ?pgbouncer=true.
+  url       = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  /// Home city, used to personalise suggestions. Optional — asked for during onboarding.
+  homeCity     String?
+  /// JSON-encoded string[] of travel interests. Seeds personalised suggestions.
+  interests    String   @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  trips         Trip[]
+  photos        TripPhoto[]
+  conversations AgentConversation[]
+}
+
+model Trip {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  destination String
+  /// Nullable: set once the destination is resolved to a place, used to centre the map.
+  latitude    Float?
+  longitude   Float?
+  startDate   DateTime
+  endDate     DateTime
+  travelers   Int      @default(1)
+  /// budget | mid | luxury
+  budgetTier  String   @default("mid")
+  /// JSON-encoded string[]
+  interests   String   @default("[]")
+  notes       String?
+  /// draft | generating | ready | failed
+  status      String   @default("draft")
+  coverImageUrl String?
+  /// Set when the traveller creates a share link; null means the trip is private.
+  shareToken  String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  days          TripDay[]
+  packingItems  PackingItem[]
+  photos        TripPhoto[]
+  bookings      Booking[]
+  collaborators TripCollaborator[]
+  conversations AgentConversation[]
+
+  @@index([userId])
+}
+
+model TripDay {
+  id        String   @id @default(cuid())
+  tripId    String
+  dayNumber Int
+  date      DateTime
+  title     String
+  summary   String
+
+  trip       Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  activities Activity[]
+
+  @@unique([tripId, dayNumber])
+  @@index([tripId])
+}
+
+model Activity {
+  id          String @id @default(cuid())
+  dayId       String
+  position    Int
+  /// morning | afternoon | evening
+  timeOfDay   String
+  title       String
+  description String
+  location    String
+  /// Model-supplied approximate coordinates. Null is normal and the map must handle it.
+  latitude    Float?
+  longitude   Float?
+  durationMin Int
+  /// Model-produced text such as "around $25pp". Never render this as a factual price.
+  costEstimate String?
+
+  day TripDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
+  @@index([dayId])
+}
+
+model PackingItem {
+  id        String   @id @default(cuid())
+  tripId    String
+  label     String
+  /// clothing | documents | electronics | toiletries | health | other
+  category  String   @default("other")
+  quantity  Int      @default(1)
+  isPacked  Boolean  @default(false)
+  /// ai | user — lets the UI show what was suggested vs. what the traveller added.
+  source    String   @default("user")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
+
+model TripPhoto {
+  id        String   @id @default(cuid())
+  tripId    String
+  userId    String
+  /// Path relative to the uploads root. Served via GET /api/uploads/:fileName.
+  fileName  String
+  caption   String?
+  width     Int?
+  height    Int?
+  sizeBytes Int
+  mimeType  String
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
+
+/// Saved booking *information* only — no inventory, payment, or reservation. See 01-product.md.
+model Booking {
+  id          String    @id @default(cuid())
+  tripId      String
+  /// hotel | car | flight
+  kind        String
+  title       String
+  provider    String
+  /// Indicative price as text, e.g. "from $180/night". Never treated as a quote.
+  priceText   String?
+  startsAt    DateTime?
+  endsAt      DateTime?
+  location    String?
+  /// Free-form JSON string with kind-specific fields (flight number, room type, ...).
+  detailsJson String    @default("{}")
+  externalUrl String?
+  /// saved | dismissed
+  status      String    @default("saved")
+  createdAt   DateTime  @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
+
+/// A family member the itinerary was shared with. Read-only for now (01-product.md).
+model TripCollaborator {
+  id        String   @id @default(cuid())
+  tripId    String
+  email     String
+  name      String?
+  /// viewer — the only role in v1
+  role      String   @default("viewer")
+  invitedAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, email])
+  @@index([tripId])
+}
+
+model AgentConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  /// Null for a general conversation not tied to one trip.
+  tripId    String?
+  title     String   @default("New conversation")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip     Trip?          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  messages AgentMessage[]
+
+  @@index([userId])
+}
+
+model AgentMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  /// user | assistant
+  role           String
+  /// Plain-text rendering. For assistant turns this is a fallback if blocks fail to render.
+  text           String
+  /// JSON-encoded UiBlock[]. Empty array for user turns. See agent/blocks.schema.ts.
+  blocksJson     String   @default("[]")
+  createdAt      DateTime @default(now())
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+/// Seeded catalogue backing the Explore tab. Not user-generated.
+model Destination {
+  id           String @id @default(cuid())
+  slug         String @unique
+  name         String
+  country      String
+  region       String
+  summary      String
+  /// JSON-encoded string[] of tags, matched against user interests for ranking.
+  tags         String @default("[]")
+  /// JSON-encoded number[] of month indices (1-12) when this place is at its best.
+  bestMonths   String @default("[]")
+  heroImageUrl String?
+  latitude     Float
+  longitude    Float
+  /// Rough daily spend per person, indicative only.
+  dailyBudgetText String?
+
+  @@index([region])
+}

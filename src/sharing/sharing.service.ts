@@ -1,9 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CollaboratorRole } from '../trips/trip.constants';
 import { TripDetailDto, toTripDetailDto } from '../trips/trip.mapper';
 import { TripsService } from '../trips/trips.service';
-import { AddCollaboratorDto } from './dto/sharing.dto';
+import { UsersService } from '../users/users.service';
+import { AddCollaboratorByCodeDto, AddCollaboratorDto, UpdateCollaboratorRoleDto } from './dto/sharing.dto';
 
 export type ShareStateDto = {
   isShared: boolean;
@@ -16,7 +18,7 @@ export type CollaboratorDto = {
   id: string;
   email: string;
   name: string | null;
-  role: string;
+  role: CollaboratorRole;
   invitedAt: string;
 };
 
@@ -31,11 +33,23 @@ export type SharedTripDto = {
   days: TripDetailDto['days'];
 };
 
+export type SharedWithMeTripDto = {
+  id: string;
+  title: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  ownerName: string;
+  role: CollaboratorRole;
+  sharedAt: string;
+};
+
 @Injectable()
 export class SharingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
+    private readonly users: UsersService,
   ) {}
 
   async getShareState(tripId: string, userId: string): Promise<ShareStateDto> {
@@ -87,7 +101,58 @@ export class SharingService {
     }
 
     const collaborator = await this.prisma.tripCollaborator.create({
-      data: { tripId, email, name: dto.name ?? null, role: 'viewer' },
+      data: { tripId, email, name: dto.name ?? null, role: dto.role ?? 'viewer' },
+    });
+
+    return toCollaboratorDto(collaborator);
+  }
+
+  /**
+   * The invite-code counterpart to `addCollaborator`. The code identifies a family member's
+   * account; the collaborator row still keys on their email, same as adding by hand.
+   */
+  async addCollaboratorByCode(
+    tripId: string,
+    userId: string,
+    dto: AddCollaboratorByCodeDto,
+  ): Promise<CollaboratorDto> {
+    await this.trips.findOwned(tripId, userId);
+
+    const member = await this.users.findSafeByInviteCode(dto.code);
+    if (!member) throw new NotFoundException('No one uses that invite code.');
+    if (member.id === userId) throw new BadRequestException('That is your own invite code.');
+
+    const existing = await this.prisma.tripCollaborator.findFirst({
+      where: { tripId, email: member.email },
+    });
+    if (existing) {
+      throw new ConflictException(`${member.name} has already been added.`);
+    }
+
+    const collaborator = await this.prisma.tripCollaborator.create({
+      data: { tripId, email: member.email, name: member.name, role: dto.role ?? 'viewer' },
+    });
+
+    return toCollaboratorDto(collaborator);
+  }
+
+  /** Owner-only, same as every other collaborator-management action — role can be changed
+   * (viewer <-> editor) any time after adding, not just fixed at add time. */
+  async updateCollaboratorRole(
+    tripId: string,
+    userId: string,
+    collaboratorId: string,
+    dto: UpdateCollaboratorRoleDto,
+  ): Promise<CollaboratorDto> {
+    await this.trips.findOwned(tripId, userId);
+    const existing = await this.prisma.tripCollaborator.findFirst({
+      where: { id: collaboratorId, tripId },
+    });
+    if (!existing) throw new NotFoundException('Collaborator not found.');
+
+    const collaborator = await this.prisma.tripCollaborator.update({
+      where: { id: collaboratorId },
+      data: { role: dto.role },
     });
 
     return toCollaboratorDto(collaborator);
@@ -104,6 +169,30 @@ export class SharingService {
     });
     if (!existing) throw new NotFoundException('Collaborator not found.');
     await this.prisma.tripCollaborator.delete({ where: { id: collaboratorId } });
+  }
+
+  /** Trips where the signed-in user's account email matches a collaborator row — i.e. trips
+   * shared with them, regardless of which owner shared it. */
+  async listSharedWithMe(userId: string): Promise<SharedWithMeTripDto[]> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) return [];
+
+    const collaborations = await this.prisma.tripCollaborator.findMany({
+      where: { email: user.email },
+      orderBy: { invitedAt: 'desc' },
+      include: { trip: { include: { user: { select: { name: true } } } } },
+    });
+
+    return collaborations.map((collaboration) => ({
+      id: collaboration.trip.id,
+      title: collaboration.trip.title,
+      destination: collaboration.trip.destination,
+      startDate: collaboration.trip.startDate.toISOString(),
+      endDate: collaboration.trip.endDate.toISOString(),
+      ownerName: collaboration.trip.user.name,
+      role: collaboration.role === 'editor' ? 'editor' : 'viewer',
+      sharedAt: collaboration.invitedAt.toISOString(),
+    }));
   }
 
   /** Unauthenticated. The token is the credential, so it must stay unguessable. */
@@ -154,7 +243,7 @@ function toCollaboratorDto(collaborator: {
     id: collaborator.id,
     email: collaborator.email,
     name: collaborator.name,
-    role: collaborator.role,
+    role: collaborator.role === 'editor' ? 'editor' : 'viewer',
     invitedAt: collaborator.invitedAt.toISOString(),
   };
 }

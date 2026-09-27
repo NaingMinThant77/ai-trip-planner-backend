@@ -178,7 +178,6 @@ export class AgentService {
         startDate: trip.startDate,
         endDate: trip.endDate,
         travelers: trip.travelers,
-        budgetTier: trip.budgetTier,
         dayTitles: trip.days.map((d) => `Day ${d.dayNumber}: ${d.title}`),
       },
     };

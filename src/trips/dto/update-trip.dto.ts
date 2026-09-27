@@ -1,17 +1,4 @@
-import {
-  ArrayMaxSize,
-  IsArray,
-  IsDateString,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
-import { BUDGET_TIERS, BudgetTier } from '../trip.constants';
+import { IsDateString, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 /**
  * Written out rather than derived with PartialType so every field keeps an explicit
@@ -22,6 +9,12 @@ export class UpdateTripDto {
   @IsString()
   @MaxLength(120)
   title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  source?: string;
 
   @IsOptional()
   @IsString()
@@ -44,15 +37,14 @@ export class UpdateTripDto {
   travelers?: number;
 
   @IsOptional()
-  @IsIn(BUDGET_TIERS)
-  budgetTier?: BudgetTier;
+  @IsString()
+  @MaxLength(2000)
+  coverImageUrl?: string;
 
   @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(10)
-  @IsString({ each: true })
-  @MaxLength(40, { each: true })
-  interests?: string[];
+  @IsString()
+  @MaxLength(200)
+  coverImagePublicId?: string;
 
   @IsOptional()
   @IsString()

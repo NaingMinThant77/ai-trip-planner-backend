@@ -1,8 +1,5 @@
 import {
-  ArrayMaxSize,
-  IsArray,
   IsDateString,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -11,13 +8,17 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { BUDGET_TIERS, BudgetTier } from '../trip.constants';
 
 export class CreateTripDto {
   @IsOptional()
   @IsString()
   @MaxLength(120)
   title?: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  source!: string;
 
   @IsString()
   @MinLength(2)
@@ -30,19 +31,21 @@ export class CreateTripDto {
   @IsDateString({}, { message: 'endDate must be an ISO date string.' })
   endDate!: string;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(20)
-  travelers!: number;
+  travelers?: number;
 
-  @IsIn(BUDGET_TIERS, { message: `budgetTier must be one of: ${BUDGET_TIERS.join(', ')}` })
-  budgetTier!: BudgetTier;
+  /** Cloudinary secure_url, produced beforehand by POST /trips/cover-image/upload or /generate. */
+  @IsString()
+  @MaxLength(2000)
+  coverImageUrl!: string;
 
-  @IsArray()
-  @ArrayMaxSize(10)
-  @IsString({ each: true })
-  @MaxLength(40, { each: true })
-  interests!: string[];
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  coverImagePublicId?: string;
 
   @IsOptional()
   @IsString()

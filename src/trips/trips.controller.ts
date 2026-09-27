@@ -15,7 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
-import { TripDetailDto, TripDto } from './trip.mapper';
+import { TripDetailDto, TripDto, TripListItemDto } from './trip.mapper';
 import { TripsService } from './trips.service';
 
 @Controller('trips')
@@ -29,7 +29,7 @@ export class TripsController {
   }
 
   @Get()
-  async findAll(@CurrentUser() user: SafeUser): Promise<TripDto[]> {
+  async findAll(@CurrentUser() user: SafeUser): Promise<TripListItemDto[]> {
     return this.trips.findAllForUser(user.id);
   }
 

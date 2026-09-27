@@ -19,7 +19,14 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
 import { UploadPhotoDto } from './dto/upload-photo.dto';
-import { MAX_PHOTO_BYTES, PhotoDto, PhotosService, UPLOAD_ROOT, generateFileName } from './photos.service';
+import {
+  MAX_PHOTO_BYTES,
+  PhotoDto,
+  PhotosService,
+  UPLOAD_ROOT,
+  generateFileName,
+  mimeTypeFor,
+} from './photos.service';
 
 @Controller('trips/:tripId/photos')
 @UseGuards(JwtAuthGuard)
@@ -78,6 +85,8 @@ export class UploadsController {
 
   @Get(':fileName')
   serve(@Param('fileName') fileName: string): StreamableFile {
-    return new StreamableFile(this.photos.streamFile(fileName));
+    return new StreamableFile(this.photos.streamFile(fileName), {
+      type: mimeTypeFor(fileName),
+    });
   }
 }

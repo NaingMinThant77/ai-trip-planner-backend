@@ -47,3 +47,48 @@ export class SaveBookingDto {
   @MaxLength(500)
   externalUrl?: string;
 }
+
+export class UpdateBookingDto {
+  @IsOptional()
+  @IsIn(BOOKING_KINDS)
+  kind?: BookingKind;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  provider?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  priceText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  location?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startsAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endsAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  detail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  externalUrl?: string;
+}

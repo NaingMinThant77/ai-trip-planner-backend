@@ -15,6 +15,21 @@ const ALLOWED_MIME = new Map<string, string>([
   ['image/heic', '.heic'],
 ]);
 
+/**
+ * Where UploadsController serves a stored file. It sits under the global `api` prefix, so the
+ * path must include it — the app prefixes only the origin (`toAbsoluteUrl`).
+ */
+function photoPath(fileName: string): string {
+  return `/api/uploads/${fileName}`;
+}
+
+/** Content-Type for a stored file, so image loaders do not get application/octet-stream. */
+export function mimeTypeFor(fileName: string): string {
+  const extension = extname(fileName).toLowerCase();
+  for (const [mime, ext] of ALLOWED_MIME) if (ext === extension) return mime;
+  return extension === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
+}
+
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
 export type PhotoDto = {
@@ -39,7 +54,7 @@ export class PhotosService {
   }
 
   async list(tripId: string, userId: string): Promise<PhotoDto[]> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.findAccessible(tripId, userId);
     const photos = await this.prisma.tripPhoto.findMany({
       where: { tripId },
       orderBy: { createdAt: 'desc' },
@@ -48,7 +63,7 @@ export class PhotosService {
 
     return photos.map((photo) => ({
       id: photo.id,
-      url: `/uploads/${photo.fileName}`,
+      url: photoPath(photo.fileName),
       caption: photo.caption,
       width: photo.width,
       height: photo.height,
@@ -63,7 +78,7 @@ export class PhotosService {
     file: Express.Multer.File,
     caption: string | null,
   ): Promise<PhotoDto> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
 
     // Trust the sniffed mime type over the filename — an extension is user-controlled.
     const extension = ALLOWED_MIME.get(file.mimetype);
@@ -91,7 +106,7 @@ export class PhotosService {
 
     return {
       id: photo.id,
-      url: `/uploads/${photo.fileName}`,
+      url: photoPath(photo.fileName),
       caption: photo.caption,
       width: photo.width,
       height: photo.height,
@@ -101,7 +116,7 @@ export class PhotosService {
   }
 
   async remove(tripId: string, userId: string, photoId: string): Promise<void> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
 
     const photo = await this.prisma.tripPhoto.findFirst({ where: { id: photoId, tripId } });
     if (!photo) throw new NotFoundException('Photo not found.');

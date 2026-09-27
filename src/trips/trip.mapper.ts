@@ -1,5 +1,5 @@
 import { Activity, Trip, TripDay } from '@prisma/client';
-import { BudgetTier, TimeOfDay, TripStatus } from './trip.constants';
+import { TimeOfDay, TripStatus } from './trip.constants';
 
 /**
  * Wire shapes. `frontend/src/types/api.ts` mirrors these by hand — change both together
@@ -15,6 +15,9 @@ export type ActivityDto = {
   latitude: number | null;
   longitude: number | null;
   durationMin: number;
+  /** "HH:mm" 24-hour, or null for a stop that only has a time of day. */
+  startTime: string | null;
+  endTime: string | null;
   costEstimate: string | null;
 };
 
@@ -30,14 +33,13 @@ export type TripDayDto = {
 export type TripDto = {
   id: string;
   title: string;
+  source: string;
   destination: string;
   latitude: number | null;
   longitude: number | null;
   startDate: string;
   endDate: string;
   travelers: number;
-  budgetTier: BudgetTier;
-  interests: string[];
   notes: string | null;
   status: TripStatus;
   coverImageUrl: string | null;
@@ -45,9 +47,28 @@ export type TripDto = {
   updatedAt: string;
 };
 
-export type TripDetailDto = TripDto & { days: TripDayDto[] };
+/**
+ * How far a trip is from being planned. Milestones rather than a guess: the itinerary is the
+ * point of the app, so it carries half the weight, and packing and bookings split the rest.
+ * Computed from row counts on the list query — never from a per-trip fetch.
+ */
+export type TripPlanningDto = {
+  /** 0-100. Only ever 0, 25, 50, 75 or 100 — the milestone weights below. */
+  progress: number;
+  hasItinerary: boolean;
+  hasPacking: boolean;
+  hasBookings: boolean;
+};
+
+/** `GET /trips` only. The detail route already ships `days`, so it needs no summary. */
+export type TripListItemDto = TripDto & { planning: TripPlanningDto };
+
+export type TripDetailDto = TripDto & { days: TripDayDto[]; viewerRole: ViewerRole };
 
 export type TripWithDays = Trip & { days: (TripDay & { activities: Activity[] })[] };
+
+/** The caller's relationship to a trip: the owner, or a collaborator with viewer/editor access. */
+export type ViewerRole = 'owner' | 'viewer' | 'editor';
 
 /**
  * SQLite cannot store an array, so `interests` is a JSON string column. A hand-edited or
@@ -71,14 +92,13 @@ export function toTripDto(trip: Trip): TripDto {
   return {
     id: trip.id,
     title: trip.title,
+    source: trip.source,
     destination: trip.destination,
     latitude: trip.latitude,
     longitude: trip.longitude,
     startDate: trip.startDate.toISOString(),
     endDate: trip.endDate.toISOString(),
     travelers: trip.travelers,
-    budgetTier: trip.budgetTier as BudgetTier,
-    interests: parseInterests(trip.interests),
     notes: trip.notes,
     status: trip.status as TripStatus,
     coverImageUrl: trip.coverImageUrl,
@@ -87,9 +107,36 @@ export function toTripDto(trip: Trip): TripDto {
   };
 }
 
-export function toTripDetailDto(trip: TripWithDays): TripDetailDto {
+const ITINERARY_WEIGHT = 50;
+const PACKING_WEIGHT = 25;
+const BOOKINGS_WEIGHT = 25;
+
+export function toTripListItemDto(
+  trip: Trip,
+  counts: { days: number; packingItems: number; bookings: number },
+): TripListItemDto {
+  const hasItinerary = counts.days > 0;
+  const hasPacking = counts.packingItems > 0;
+  const hasBookings = counts.bookings > 0;
+
   return {
     ...toTripDto(trip),
+    planning: {
+      progress:
+        (hasItinerary ? ITINERARY_WEIGHT : 0) +
+        (hasPacking ? PACKING_WEIGHT : 0) +
+        (hasBookings ? BOOKINGS_WEIGHT : 0),
+      hasItinerary,
+      hasPacking,
+      hasBookings,
+    },
+  };
+}
+
+export function toTripDetailDto(trip: TripWithDays, viewerRole: ViewerRole = 'owner'): TripDetailDto {
+  return {
+    ...toTripDto(trip),
+    viewerRole,
     days: [...trip.days]
       .sort((a, b) => a.dayNumber - b.dayNumber)
       .map((day) => ({
@@ -110,6 +157,8 @@ export function toTripDetailDto(trip: TripWithDays): TripDetailDto {
             latitude: activity.latitude,
             longitude: activity.longitude,
             durationMin: activity.durationMin,
+            startTime: activity.startTime,
+            endTime: activity.endTime,
             costEstimate: activity.costEstimate,
           })),
       })),

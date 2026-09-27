@@ -45,14 +45,16 @@ model User {
   family        FamilyMember[]      @relation("FamilyOwner")
   /// Lists this user appears in, because someone else entered their invite code.
   familyOf      FamilyMember[]      @relation("FamilyMemberUser")
+  messagesSent     Message[] @relation("MessageSender")
+  messagesReceived Message[] @relation("MessageRecipient")
 }
 
-/// Someone the owner keeps on hand so any trip can be shared in one tap.
-/// Deliberately **one-directional** (decision #19): adding someone does not add you to
-/// their list, so learning a code never puts you inside that person's own family list.
+/// Someone kept on hand so any trip can be shared in one tap. Mutual: one row represents the
+/// relationship regardless of who typed the code, so it appears in both people's lists and a
+/// delete from either side removes it for both (supersedes decision #19's one-directional model).
 model FamilyMember {
   id       String   @id @default(cuid())
-  /// The user who typed the invite code.
+  /// The user who typed the invite code when the relationship was created.
   ownerId  String
   /// The user whose invite code was typed.
   memberId String
@@ -66,10 +68,31 @@ model FamilyMember {
   @@index([memberId])
 }
 
+/// A direct message between two users. Restricted to people who are mutual family members
+/// (see FamilyMember) — there is no general "message any user" surface.
+model Message {
+  id          String    @id @default(cuid())
+  senderId    String
+  recipientId String
+  text        String
+  createdAt   DateTime  @default(now())
+  /// Null until the recipient opens the thread. Set in bulk for every unread message in a
+  /// thread at once, not per-message — good enough for read ticks, not a per-message receipt.
+  readAt      DateTime?
+
+  sender    User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient User @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, recipientId, createdAt])
+  @@index([recipientId, senderId, createdAt])
+}
+
 model Trip {
   id          String   @id @default(cuid())
   userId      String
   title       String
+  /// Departure city/place the traveller is leaving from.
+  source      String   @default("")
   destination String
   /// Nullable: set once the destination is resolved to a place, used to centre the map.
   latitude    Float?
@@ -77,14 +100,13 @@ model Trip {
   startDate   DateTime
   endDate     DateTime
   travelers   Int      @default(1)
-  /// budget | mid | luxury
-  budgetTier  String   @default("mid")
-  /// JSON-encoded string[]
-  interests   String   @default("[]")
   notes       String?
   /// draft | generating | ready | failed
   status      String   @default("draft")
   coverImageUrl String?
+  /// Cloudinary public_id for coverImageUrl. Kept so replacing or deleting the trip can
+  /// delete the asset — without it the image stays in the account forever.
+  coverImagePublicId String?
   /// Set when the traveller creates a share link; null means the trip is private.
   shareToken  String?  @unique
   createdAt   DateTime @default(now())
@@ -129,6 +151,9 @@ model Activity {
   latitude    Float?
   longitude   Float?
   durationMin Int
+  /// "HH:mm", 24-hour. Null on generated stops, which only carry a time of day.
+  startTime   String?
+  endTime     String?
   /// Model-produced text such as "around $25pp". Never render this as a factual price.
   costEstimate String?
 

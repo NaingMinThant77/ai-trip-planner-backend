@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AnthropicService } from '../ai/anthropic.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PACKING_CATEGORIES, PackingCategory } from '../trips/trip.constants';
-import { parseInterests } from '../trips/trip.mapper';
 import { TripsService } from '../trips/trips.service';
 import { CreatePackingItemDto, UpdatePackingItemDto } from './dto/packing.dto';
 
@@ -47,7 +46,7 @@ export class PackingService {
   ) {}
 
   async list(tripId: string, userId: string): Promise<PackingItemDto[]> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.findAccessible(tripId, userId);
     const items = await this.prisma.packingItem.findMany({
       where: { tripId },
       orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
@@ -60,7 +59,7 @@ export class PackingService {
     userId: string,
     dto: CreatePackingItemDto,
   ): Promise<PackingItemDto> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
     const count = await this.prisma.packingItem.count({ where: { tripId } });
 
     const item = await this.prisma.packingItem.create({
@@ -83,7 +82,7 @@ export class PackingService {
     itemId: string,
     dto: UpdatePackingItemDto,
   ): Promise<PackingItemDto> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
 
     // Scoped by tripId so an id from another trip cannot be updated through this route.
     const existing = await this.prisma.packingItem.findFirst({ where: { id: itemId, tripId } });
@@ -103,7 +102,7 @@ export class PackingService {
   }
 
   async remove(tripId: string, userId: string, itemId: string): Promise<void> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
     const existing = await this.prisma.packingItem.findFirst({ where: { id: itemId, tripId } });
     if (!existing) throw new NotFoundException('Packing item not found.');
     await this.prisma.packingItem.delete({ where: { id: itemId } });
@@ -114,7 +113,7 @@ export class PackingService {
    * traveller added or ticked off survives a re-run.
    */
   async generate(tripId: string, userId: string): Promise<PackingItemDto[]> {
-    const trip = await this.trips.findOwned(tripId, userId);
+    const trip = await this.trips.assertEditable(tripId, userId);
     const nights = Math.max(
       1,
       Math.round((trip.endDate.getTime() - trip.startDate.getTime()) / 86_400_000),
@@ -131,8 +130,6 @@ export class PackingService {
             `Destination: ${trip.destination}`,
             `Dates: ${trip.startDate.toISOString().slice(0, 10)} to ${trip.endDate.toISOString().slice(0, 10)} (${nights} nights)`,
             `Travellers: ${trip.travelers}`,
-            `Budget tier: ${trip.budgetTier}`,
-            `Interests: ${parseInterests(trip.interests).join(', ') || 'none given'}`,
             '',
             'Build the packing list for one traveller.',
           ].join('\n'),

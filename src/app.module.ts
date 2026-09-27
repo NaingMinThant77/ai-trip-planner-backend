@@ -9,6 +9,7 @@ import { FamilyModule } from './family/family.module';
 import { HealthController } from './health/health.controller';
 import { ItineraryModule } from './itinerary/itinerary.module';
 import { MediaModule } from './media/media.module';
+import { MessagesModule } from './messages/messages.module';
 import { PackingModule } from './packing/packing.module';
 import { PhotosModule } from './photos/photos.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module';
     ExploreModule,
     FamilyModule,
     MediaModule,
+    MessagesModule,
   ],
   controllers: [HealthController],
 })

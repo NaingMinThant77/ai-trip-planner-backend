@@ -1,25 +1,10 @@
-import { BudgetTier } from '../trips/trip.constants';
-
 export type TripBrief = {
   destination: string;
   startDate: Date;
   endDate: Date;
   dayCount: number;
   travelers: number;
-  budgetTier: BudgetTier;
-  interests: string[];
   notes: string | null;
-};
-
-const BUDGET_GUIDANCE: Record<BudgetTier, string> = {
-  budget:
-    'Budget-conscious: free sights, street food, public transport, walkable clusters. ' +
-    'Avoid anything with a high ticket price unless it is the single defining sight.',
-  mid: 'Mid-range: a mix of paid attractions and free wandering, sit-down restaurants, ' +
-    'the occasional taxi. Balance cost against time saved.',
-  luxury:
-    'Higher-end: notable restaurants, private or small-group experiences, comfort over ' +
-    'cost. Still include the genuinely worthwhile free sights.',
 };
 
 export const ITINERARY_SYSTEM_PROMPT = [
@@ -43,12 +28,8 @@ export function buildItineraryPrompt(brief: TripBrief): string {
     '',
     `Dates: ${formatDate(brief.startDate)} to ${formatDate(brief.endDate)}`,
     `Travellers: ${brief.travelers}`,
-    `Budget: ${BUDGET_GUIDANCE[brief.budgetTier]}`,
   ];
 
-  if (brief.interests.length > 0) {
-    lines.push(`Interests to lean into: ${brief.interests.join(', ')}`);
-  }
   if (brief.notes) {
     // User-authored text. It is a preference to weigh, not an instruction that outranks
     // the system prompt — the fencing below keeps that boundary legible to the model.
@@ -74,12 +55,7 @@ export function buildDayRegenerationPrompt(
     `Replace day ${dayNumber} with a different plan.`,
     '',
     `Travellers: ${brief.travelers}`,
-    `Budget: ${BUDGET_GUIDANCE[brief.budgetTier]}`,
   ];
-
-  if (brief.interests.length > 0) {
-    lines.push(`Interests: ${brief.interests.join(', ')}`);
-  }
 
   if (otherDayTitles.length > 0) {
     lines.push(

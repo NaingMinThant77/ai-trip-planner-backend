@@ -18,20 +18,16 @@ export class MockBookingProvider extends BookingProvider {
       hotel: () => this.hotels(query),
       car: () => this.cars(query),
       flight: () => this.flights(query),
+      // "Extra" bookings (tickets, tours, ...) are hand-entered only — there is nothing to search.
+      extra: () => [],
     };
 
     return Promise.resolve(builders[query.kind]());
   }
 
-  private priceBand(query: BookingSearchQuery): [number, number] {
-    switch (query.budgetTier) {
-      case 'budget':
-        return [45, 90];
-      case 'luxury':
-        return [320, 700];
-      default:
-        return [110, 240];
-    }
+  /** Sample data no longer varies by budget tier — a single mid-range band for every trip. */
+  private priceBand(_query: BookingSearchQuery): [number, number] {
+    return [110, 240];
   }
 
   private hotels(query: BookingSearchQuery): BookingOffer[] {

@@ -6,14 +6,25 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
-import { AddCollaboratorDto } from './dto/sharing.dto';
-import { CollaboratorDto, ShareStateDto, SharedTripDto, SharingService } from './sharing.service';
+import {
+  AddCollaboratorByCodeDto,
+  AddCollaboratorDto,
+  UpdateCollaboratorRoleDto,
+} from './dto/sharing.dto';
+import {
+  CollaboratorDto,
+  ShareStateDto,
+  SharedTripDto,
+  SharedWithMeTripDto,
+  SharingService,
+} from './sharing.service';
 
 @Controller('trips/:tripId/share')
 @UseGuards(JwtAuthGuard)
@@ -61,6 +72,25 @@ export class SharingController {
     return this.sharing.addCollaborator(tripId, user.id, dto);
   }
 
+  @Post('collaborators/by-code')
+  async addCollaboratorByCode(
+    @CurrentUser() user: SafeUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: AddCollaboratorByCodeDto,
+  ): Promise<CollaboratorDto> {
+    return this.sharing.addCollaboratorByCode(tripId, user.id, dto);
+  }
+
+  @Patch('collaborators/:collaboratorId')
+  async updateCollaboratorRole(
+    @CurrentUser() user: SafeUser,
+    @Param('tripId') tripId: string,
+    @Param('collaboratorId') collaboratorId: string,
+    @Body() dto: UpdateCollaboratorRoleDto,
+  ): Promise<CollaboratorDto> {
+    return this.sharing.updateCollaboratorRole(tripId, user.id, collaboratorId, dto);
+  }
+
   @Delete('collaborators/:collaboratorId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeCollaborator(
@@ -80,5 +110,20 @@ export class SharedTripController {
   @Get(':shareToken')
   async getSharedTrip(@Param('shareToken') shareToken: string): Promise<SharedTripDto> {
     return this.sharing.getSharedTrip(shareToken);
+  }
+}
+
+/**
+ * Distinct path from `shared/:shareToken` above on purpose — this is authenticated (a
+ * signed-in user's own inbox of trips shared with them), that one is a public link.
+ */
+@Controller('shared-trips')
+@UseGuards(JwtAuthGuard)
+export class SharedTripsController {
+  constructor(private readonly sharing: SharingService) {}
+
+  @Get()
+  async listSharedWithMe(@CurrentUser() user: SafeUser): Promise<SharedWithMeTripDto[]> {
+    return this.sharing.listSharedWithMe(user.id);
   }
 }

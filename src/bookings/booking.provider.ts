@@ -16,7 +16,6 @@ export type BookingSearchQuery = {
   startDate: Date;
   endDate: Date;
   travelers: number;
-  budgetTier: string;
 };
 
 export type BookingOffer = {

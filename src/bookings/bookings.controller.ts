@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -14,7 +15,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
 import { BookingOfferDto, BookingsService, SavedBookingDto } from './bookings.service';
-import { SaveBookingDto, SearchBookingsDto } from './dto/bookings.dto';
+import { SaveBookingDto, SearchBookingsDto, UpdateBookingDto } from './dto/bookings.dto';
 
 @Controller('trips/:tripId/bookings')
 @UseGuards(JwtAuthGuard)
@@ -46,6 +47,16 @@ export class BookingsController {
     @Body() dto: SaveBookingDto,
   ): Promise<SavedBookingDto> {
     return this.bookings.save(tripId, user.id, dto);
+  }
+
+  @Patch(':bookingId')
+  async update(
+    @CurrentUser() user: SafeUser,
+    @Param('tripId') tripId: string,
+    @Param('bookingId') bookingId: string,
+    @Body() dto: UpdateBookingDto,
+  ): Promise<SavedBookingDto> {
+    return this.bookings.update(tripId, user.id, bookingId, dto);
   }
 
   @Delete(':bookingId')

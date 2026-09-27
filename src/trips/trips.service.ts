@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { CloudinaryService } from '../media/cloudinary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
@@ -6,17 +7,24 @@ import { MAX_TRIP_DAYS } from './trip.constants';
 import {
   TripDetailDto,
   TripDto,
+  TripListItemDto,
   TripWithDays,
-  serializeInterests,
+  ViewerRole,
   toTripDetailDto,
   toTripDto,
+  toTripListItemDto,
 } from './trip.mapper';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+const DEFAULT_TRAVELERS = 1;
+
 @Injectable()
 export class TripsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async create(userId: string, dto: CreateTripDto): Promise<TripDto> {
     const { startDate, endDate } = this.assertValidDates(dto.startDate, dto.endDate);
@@ -25,12 +33,13 @@ export class TripsService {
       data: {
         userId,
         title: dto.title?.trim() || `Trip to ${dto.destination}`,
+        source: dto.source,
         destination: dto.destination,
         startDate,
         endDate,
-        travelers: dto.travelers,
-        budgetTier: dto.budgetTier,
-        interests: serializeInterests(dto.interests),
+        travelers: dto.travelers ?? DEFAULT_TRAVELERS,
+        coverImageUrl: dto.coverImageUrl,
+        coverImagePublicId: dto.coverImagePublicId ?? null,
         notes: dto.notes ?? null,
         status: 'draft',
       },
@@ -39,16 +48,28 @@ export class TripsService {
     return toTripDto(trip);
   }
 
-  async findAllForUser(userId: string): Promise<TripDto[]> {
+  async findAllForUser(userId: string): Promise<TripListItemDto[]> {
     const trips = await this.prisma.trip.findMany({
       where: { userId },
       orderBy: { startDate: 'asc' },
+      // Counted here so the list can show planning progress in one query. Fetching each
+      // trip's detail to work this out would be one request per card.
+      include: { _count: { select: { days: true, packingItems: true, bookings: true } } },
     });
-    return trips.map(toTripDto);
+
+    return trips.map((trip) =>
+      toTripListItemDto(trip, {
+        days: trip._count.days,
+        packingItems: trip._count.packingItems,
+        bookings: trip._count.bookings,
+      }),
+    );
   }
 
+  /** Owner, or any collaborator with viewer/editor access — used for every read. */
   async findOneForUser(id: string, userId: string): Promise<TripDetailDto> {
-    return toTripDetailDto(await this.findOwned(id, userId));
+    const { trip, role } = await this.findAccessible(id, userId);
+    return toTripDetailDto(trip, role);
   }
 
   async update(id: string, userId: string, dto: UpdateTripDto): Promise<TripDto> {
@@ -63,12 +84,13 @@ export class TripsService {
       where: { id },
       data: {
         title: dto.title ?? undefined,
+        source: dto.source ?? undefined,
         destination: dto.destination ?? undefined,
         startDate,
         endDate,
         travelers: dto.travelers ?? undefined,
-        budgetTier: dto.budgetTier ?? undefined,
-        interests: dto.interests ? serializeInterests(dto.interests) : undefined,
+        coverImageUrl: dto.coverImageUrl ?? undefined,
+        coverImagePublicId: dto.coverImagePublicId ?? undefined,
         notes: dto.notes ?? undefined,
       },
     });
@@ -77,15 +99,20 @@ export class TripsService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOwned(id, userId);
+    const existing = await this.findOwned(id, userId);
     // Days and activities go with it — see onDelete: Cascade in schema.prisma.
     await this.prisma.trip.delete({ where: { id } });
+
+    if (existing.coverImagePublicId) {
+      await this.cloudinary.deleteImage(existing.coverImagePublicId);
+    }
   }
 
   /**
-   * The single authorization checkpoint for trip-scoped work (see memory/02-architecture.md).
-   * Returns 404 rather than 403 for someone else's trip so the API does not confirm that an
-   * id exists to a user who cannot see it.
+   * The authorization checkpoint for owner-only work — trip-level edits, deleting the trip,
+   * and managing sharing/collaborators (see memory/02-architecture.md). Returns 404 rather
+   * than 403 for someone else's trip so the API does not confirm that an id exists to a user
+   * who cannot see it.
    */
   async findOwned(id: string, userId: string): Promise<TripWithDays> {
     const trip = await this.prisma.trip.findFirst({
@@ -97,6 +124,39 @@ export class TripsService {
       throw new NotFoundException('Trip not found.');
     }
 
+    return trip;
+  }
+
+  /**
+   * The authorization checkpoint for everything else — itinerary/bookings/packing/photos.
+   * Owner gets full access; a collaborator (matched by their account email against
+   * `TripCollaborator.email`) gets `viewer` or `editor` depending on the role they were given.
+   * Same 404-not-403 posture as `findOwned` for an id the caller cannot see at all.
+   */
+  async findAccessible(id: string, userId: string): Promise<{ trip: TripWithDays; role: ViewerRole }> {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id },
+      include: { days: { include: { activities: true } } },
+    });
+    if (!trip) throw new NotFoundException('Trip not found.');
+    if (trip.userId === userId) return { trip, role: 'owner' };
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const collaborator = user
+      ? await this.prisma.tripCollaborator.findFirst({ where: { tripId: id, email: user.email } })
+      : null;
+
+    if (!collaborator) throw new NotFoundException('Trip not found.');
+    return { trip, role: collaborator.role === 'editor' ? 'editor' : 'viewer' };
+  }
+
+  /** Same access check as `findAccessible`, but rejects a viewer — for itinerary/bookings/
+   * packing/photos writes, which an editor collaborator may perform but a viewer may not. */
+  async assertEditable(id: string, userId: string): Promise<TripWithDays> {
+    const { trip, role } = await this.findAccessible(id, userId);
+    if (role === 'viewer') {
+      throw new ForbiddenException('You have view-only access to this trip.');
+    }
     return trip;
   }
 

@@ -13,8 +13,10 @@ const API_BASE = 'https://api.cloudinary.com/v1_1';
 
 /** Everything the app uploads lands here, so an account can be cleaned up in one place. */
 const AVATAR_FOLDER = 'ai-trip-planner/avatars';
+const TRIP_COVER_FOLDER = 'ai-trip-planner/trip-covers';
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+export const MAX_TRIP_COVER_BYTES = 8 * 1024 * 1024;
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 
@@ -45,31 +47,55 @@ export class CloudinaryService {
     mimetype: string;
     size: number;
   }): Promise<UploadedImage> {
+    return this.uploadImage(file, {
+      folder: AVATAR_FOLDER,
+      publicIdPrefix: 'avatar',
+      maxBytes: MAX_AVATAR_BYTES,
+      tooLargeMessage: 'That image is larger than 5 MB.',
+    });
+  }
+
+  /** Used for both a traveller's own upload and an AI-generated cover — same folder either way. */
+  async uploadTripCover(file: {
+    buffer: Buffer;
+    mimetype: string;
+    size: number;
+  }): Promise<UploadedImage> {
+    return this.uploadImage(file, {
+      folder: TRIP_COVER_FOLDER,
+      publicIdPrefix: 'trip-cover',
+      maxBytes: MAX_TRIP_COVER_BYTES,
+      tooLargeMessage: 'That image is larger than 8 MB.',
+    });
+  }
+
+  private async uploadImage(
+    file: { buffer: Buffer; mimetype: string; size: number },
+    options: { folder: string; publicIdPrefix: string; maxBytes: number; tooLargeMessage: string },
+  ): Promise<UploadedImage> {
     this.assertConfigured();
 
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       throw new BadRequestException('Upload a JPEG, PNG, WebP or HEIC image.');
     }
     // Multer's own limit rejects most of these first; this covers a caller that bypasses it.
-    if (file.size > MAX_AVATAR_BYTES) {
-      throw new BadRequestException('That image is larger than 5 MB.');
+    if (file.size > options.maxBytes) {
+      throw new BadRequestException(options.tooLargeMessage);
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
-    // A fresh id per upload rather than one keyed by user: replacing a photo then has a
-    // window where both exist, so a failed delete cannot leave the user with no avatar.
-    const publicId = `avatar-${randomUUID()}`;
+    // A fresh id per upload rather than one keyed by owner: replacing an image then has a
+    // window where both exist, so a failed delete cannot leave the caller with nothing.
+    const publicId = `${options.publicIdPrefix}-${randomUUID()}`;
+    const { folder } = options;
 
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }));
     form.append('api_key', this.apiKey);
     form.append('timestamp', String(timestamp));
-    form.append('folder', AVATAR_FOLDER);
+    form.append('folder', folder);
     form.append('public_id', publicId);
-    form.append(
-      'signature',
-      this.sign({ folder: AVATAR_FOLDER, public_id: publicId, timestamp: String(timestamp) }),
-    );
+    form.append('signature', this.sign({ folder, public_id: publicId, timestamp: String(timestamp) }));
 
     const response = await fetch(`${API_BASE}/${this.cloudName}/image/upload`, {
       method: 'POST',

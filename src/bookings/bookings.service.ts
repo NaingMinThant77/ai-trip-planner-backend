@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BookingKind } from '../trips/trip.constants';
 import { TripsService } from '../trips/trips.service';
 import { BookingOffer, BookingProvider } from './booking.provider';
-import { SaveBookingDto } from './dto/bookings.dto';
+import { SaveBookingDto, UpdateBookingDto } from './dto/bookings.dto';
 
 export type BookingOfferDto = {
   externalId: string;
@@ -43,7 +43,7 @@ export class BookingsService {
 
   /** Search is stateless — nothing is written until the traveller saves an offer. */
   async search(tripId: string, userId: string, kind: BookingKind): Promise<BookingOfferDto[]> {
-    const trip = await this.trips.findOwned(tripId, userId);
+    const { trip } = await this.trips.findAccessible(tripId, userId);
 
     const offers = await this.provider.search({
       kind,
@@ -51,14 +51,13 @@ export class BookingsService {
       startDate: trip.startDate,
       endDate: trip.endDate,
       travelers: trip.travelers,
-      budgetTier: trip.budgetTier,
     });
 
     return offers.map(toOfferDto);
   }
 
   async listSaved(tripId: string, userId: string): Promise<SavedBookingDto[]> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.findAccessible(tripId, userId);
     const bookings = await this.prisma.booking.findMany({
       where: { tripId, status: 'saved' },
       orderBy: { createdAt: 'desc' },
@@ -80,7 +79,7 @@ export class BookingsService {
   }
 
   async save(tripId: string, userId: string, dto: SaveBookingDto): Promise<SavedBookingDto> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
 
     const booking = await this.prisma.booking.create({
       data: {
@@ -113,8 +112,48 @@ export class BookingsService {
     };
   }
 
+  async update(
+    tripId: string,
+    userId: string,
+    bookingId: string,
+    dto: UpdateBookingDto,
+  ): Promise<SavedBookingDto> {
+    await this.trips.assertEditable(tripId, userId);
+    const existing = await this.prisma.booking.findFirst({ where: { id: bookingId, tripId } });
+    if (!existing) throw new NotFoundException('Booking not found.');
+
+    const booking = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        kind: dto.kind ?? undefined,
+        title: dto.title ?? undefined,
+        provider: dto.provider ?? undefined,
+        priceText: dto.priceText ?? undefined,
+        location: dto.location ?? undefined,
+        startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
+        endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
+        detailsJson: dto.detail !== undefined ? JSON.stringify({ detail: dto.detail }) : undefined,
+        externalUrl: dto.externalUrl ?? undefined,
+      },
+    });
+
+    return {
+      id: booking.id,
+      kind: booking.kind as BookingKind,
+      title: booking.title,
+      provider: booking.provider,
+      priceText: booking.priceText,
+      location: booking.location,
+      startsAt: booking.startsAt?.toISOString() ?? null,
+      endsAt: booking.endsAt?.toISOString() ?? null,
+      detail: readDetail(booking.detailsJson),
+      externalUrl: booking.externalUrl,
+      createdAt: booking.createdAt.toISOString(),
+    };
+  }
+
   async remove(tripId: string, userId: string, bookingId: string): Promise<void> {
-    await this.trips.findOwned(tripId, userId);
+    await this.trips.assertEditable(tripId, userId);
     const booking = await this.prisma.booking.findFirst({ where: { id: bookingId, tripId } });
     if (!booking) throw new NotFoundException('Booking not found.');
     await this.prisma.booking.delete({ where: { id: bookingId } });

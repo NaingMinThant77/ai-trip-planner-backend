@@ -1,10 +1,15 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 import { GoogleOAuthService } from './auth/google-oauth.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+
+  // Chat (`ChatGateway`) needs the socket.io adapter explicitly — it is not wired up by
+  // default just because `@nestjs/websockets` and `socket.io` are installed.
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   app.setGlobalPrefix('api');
 

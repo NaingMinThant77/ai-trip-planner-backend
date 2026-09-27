@@ -11,7 +11,6 @@ export type AgentContext = {
     startDate: Date;
     endDate: Date;
     travelers: number;
-    budgetTier: string;
     dayTitles: string[];
   } | null;
 };
@@ -50,7 +49,7 @@ export function buildAgentSystemPrompt(context: AgentContext): string {
       '',
       'CURRENT TRIP',
       `${t.title} — ${t.destination}`,
-      `${iso(t.startDate)} to ${iso(t.endDate)}, ${t.travelers} traveller(s), ${t.budgetTier} budget`,
+      `${iso(t.startDate)} to ${iso(t.endDate)}, ${t.travelers} traveller(s)`,
     );
     if (t.dayTitles.length > 0) {
       lines.push('Planned days:', ...t.dayTitles.map((title) => `- ${title}`));

@@ -11,6 +11,12 @@ export type MessageDto = {
   readAt: string | null;
 };
 
+export type UnreadSummaryDto = {
+  total: number;
+  /** Unread count keyed by the sender's user id. */
+  byPeer: Record<string, number>;
+};
+
 const PAGE_SIZE = 50;
 
 @Injectable()
@@ -47,6 +53,21 @@ export class MessagesService {
     });
 
     return rows.reverse().map(toDto);
+  }
+
+  async unreadSummary(userId: string): Promise<UnreadSummaryDto> {
+    const groups = await this.prisma.message.groupBy({
+      by: ['senderId'],
+      where: { recipientId: userId, readAt: null },
+      _count: { _all: true },
+    });
+    const byPeer: Record<string, number> = {};
+    let total = 0;
+    for (const group of groups) {
+      byPeer[group.senderId] = group._count._all;
+      total += group._count._all;
+    }
+    return { total, byPeer };
   }
 
   async send(senderId: string, recipientId: string, text: string): Promise<MessageDto> {

@@ -11,7 +11,7 @@ datasource db {
   // Runtime connection. Use Supabase's TRANSACTION pooler (port 6543) + ?pgbouncer=true.
   url       = env("DATABASE_URL")
   // Migrations need a real session: PgBouncer transaction mode has no DDL or advisory locks.
-  directUrl = env("DIRECT_URL")
+  // directUrl = env("DIRECT_URL")
 }
 
 model User {

@@ -38,15 +38,6 @@ export class PackingController {
     return this.packing.create(tripId, user.id, dto);
   }
 
-  /** AI-seeds the list. Keeps user-added and already-packed items. */
-  @Post('generate')
-  async generate(
-    @CurrentUser() user: SafeUser,
-    @Param('tripId') tripId: string,
-  ): Promise<PackingItemDto[]> {
-    return this.packing.generate(tripId, user.id);
-  }
-
   @Patch(':itemId')
   async update(
     @CurrentUser() user: SafeUser,

@@ -1,4 +1,8 @@
-import { UiBlock } from './blocks.schema';
+import { MAX_TRIP_DAYS } from '../trips/trip.constants';
+import { TripSummaryBlock, UiBlock } from './blocks.schema';
+
+export const MAX_BLOCKS = 7;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * The tool schema is deliberately a single loose object shape (JSON Schema unions are poorly
@@ -13,12 +17,13 @@ export function parseUiBlocks(raw: unknown): UiBlock[] {
   if (!Array.isArray(blocks)) return [];
 
   return blocks
-    .map((block) => parseBlock(block))
+    .map((block) => parseUiBlock(block))
     .filter((block): block is UiBlock => block !== null)
-    .slice(0, 6);
+    .slice(0, MAX_BLOCKS);
 }
 
-function parseBlock(raw: unknown): UiBlock | null {
+/** Narrows one raw block, or returns null when it cannot be rendered / saved. */
+export function parseUiBlock(raw: unknown): UiBlock | null {
   const b = asRecord(raw);
   if (!b) return null;
 
@@ -29,26 +34,17 @@ function parseBlock(raw: unknown): UiBlock | null {
     }
 
     case 'itinerary_card': {
-      const title = str(b.title);
-      const summary = str(b.summary);
-      if (!title || !summary) return null;
+      // Models often send only one of title/summary. What makes a day worth showing (and saving)
+      // is its stops, so require those and fill the rest in rather than dropping the card.
+      const items = itineraryItemsFrom(b);
+      if (items.length === 0) return null;
+      const dayNumber = int(b.dayNumber) ?? 1;
       return {
         type: 'itinerary_card',
-        dayNumber: int(b.dayNumber) ?? 1,
-        title,
-        summary,
-        items: list(b.items)
-          .map((item) => {
-            const r = asRecord(item);
-            const itemTitle = str(r?.title);
-            if (!itemTitle) return null;
-            return {
-              timeOfDay: str(r?.timeOfDay) ?? 'morning',
-              title: itemTitle,
-              location: str(r?.location) ?? '',
-            };
-          })
-          .filter((i): i is { timeOfDay: string; title: string; location: string } => i !== null),
+        dayNumber,
+        title: str(b.title) ?? str(b.heading) ?? `Day ${dayNumber}`,
+        summary: str(b.summary) ?? '',
+        items,
       };
     }
 
@@ -157,9 +153,123 @@ function parseBlock(raw: unknown): UiBlock | null {
       return { type: 'choice_prompt', question, choices };
     }
 
+    case 'trip_summary':
+      return parseTripSummary(b);
+
+    case 'suggestions': {
+      const chips = list(b.chips)
+        .map((chip) => str(chip))
+        .filter((chip): chip is string => chip !== null)
+        .map((chip) => chip.slice(0, 60))
+        .slice(0, 4);
+      return chips.length > 0 ? { type: 'suggestions', chips } : null;
+    }
+
     default:
       return null;
   }
+}
+
+/**
+ * A trip that cannot be created is dropped rather than shown with a Save button that will 400:
+ * the dates must be real, ordered, and within the trip length limit.
+ */
+function parseTripSummary(b: Record<string, unknown>): TripSummaryBlock | null {
+  const title = str(b.title);
+  const destination = str(b.destination);
+  const startDate = isoDate(b.startDate);
+  const endDate = isoDate(b.endDate);
+  if (!title || !destination || !startDate || !endDate) return null;
+
+  const dayCount = Math.round((Date.parse(endDate) - Date.parse(startDate)) / MS_PER_DAY) + 1;
+  if (dayCount < 1 || dayCount > MAX_TRIP_DAYS) return null;
+
+  const days = list(b.days)
+    .map((day) => {
+      const r = asRecord(day);
+      const dayNumber = int(r?.dayNumber);
+      const dayTitle = str(r?.title);
+      if (!r || dayNumber === null || dayNumber < 1 || dayNumber > dayCount || !dayTitle) {
+        return null;
+      }
+      return {
+        dayNumber,
+        title: dayTitle,
+        summary: str(r.summary) ?? '',
+        items: parseItineraryItems(r.items),
+      };
+    })
+    .filter((d): d is NonNullable<typeof d> => d !== null);
+
+  return {
+    type: 'trip_summary',
+    title,
+    source: str(b.source) ?? '',
+    destination,
+    startDate,
+    endDate,
+    travelers: Math.min(20, Math.max(1, int(b.travelers) ?? 1)),
+    summary: str(b.summary) ?? '',
+    budgetText: str(b.budgetText),
+    highlights: list(b.highlights)
+      .map((h) => str(h))
+      .filter((h): h is string => h !== null)
+      .slice(0, 5),
+    days,
+  };
+}
+
+/**
+ * The schema is one flat shape shared by every block type, so models sometimes file a day's
+ * stops under a neighbouring field. Look where they put them rather than losing the card:
+ * `items`, then the first of `days[].items`, then `highlights` / `places` as plain stop names.
+ */
+function itineraryItemsFrom(b: Record<string, unknown>): { timeOfDay: string; title: string; location: string }[] {
+  const direct = parseItineraryItems(b.items);
+  if (direct.length > 0) return direct;
+
+  for (const day of list(b.days)) {
+    const nested = parseItineraryItems(asRecord(day)?.items);
+    if (nested.length > 0) return nested;
+  }
+
+  const names = [
+    ...list(b.highlights).map((h) => str(h)),
+    ...list(b.places).map((place) => str(asRecord(place)?.name)),
+  ].filter((name): name is string => name !== null);
+
+  const slots = ['morning', 'afternoon', 'evening'];
+  return names.slice(0, 6).map((title, index) => ({
+    title,
+    location: '',
+    timeOfDay: slots[Math.min(slots.length - 1, Math.floor((index * slots.length) / names.length))],
+  }));
+}
+
+function parseItineraryItems(raw: unknown): { timeOfDay: string; title: string; location: string }[] {
+  return list(raw)
+    .map((item) => {
+      const r = asRecord(item);
+      const itemTitle = str(r?.title);
+      if (!itemTitle) return null;
+      return {
+        timeOfDay: str(r?.timeOfDay) ?? 'morning',
+        title: itemTitle,
+        location: str(r?.location) ?? '',
+      };
+    })
+    .filter((i): i is { timeOfDay: string; title: string; location: string } => i !== null);
+}
+
+/** Accepts YYYY-MM-DD (or a full ISO timestamp, trimmed) and rejects impossible dates. */
+function isoDate(value: unknown): string | null {
+  const text = str(value);
+  if (!text) return null;
+  const day = text.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) return null;
+  return day;
 }
 
 /** Plain-text fallback stored alongside the blocks, used if a client cannot render them. */
@@ -183,6 +293,10 @@ export function blocksToPlainText(blocks: UiBlock[]): string {
           return `${block.heading}: ${block.pins.map((p) => p.label).join(', ')}`;
         case 'choice_prompt':
           return `${block.question} (${block.choices.map((c) => c.label).join(' / ')})`;
+        case 'trip_summary':
+          return `Trip plan: ${block.title} — ${block.destination}, ${block.startDate} to ${block.endDate}. ${block.summary}`.trim();
+        case 'suggestions':
+          return '';
       }
     })
     .filter((line) => line.length > 0)

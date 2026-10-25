@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AnthropicService } from '../ai/anthropic.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PACKING_CATEGORIES, PackingCategory } from '../trips/trip.constants';
 import { TripsService } from '../trips/trips.service';
@@ -15,34 +14,11 @@ export type PackingItemDto = {
   position: number;
 };
 
-const PACKING_TOOL_NAME = 'save_packing_list';
-
-const PACKING_TOOL_SCHEMA = {
-  type: 'object' as const,
-  properties: {
-    items: {
-      type: 'array',
-      description: 'Between 12 and 25 items. Practical and specific to this trip.',
-      items: {
-        type: 'object',
-        properties: {
-          label: { type: 'string', description: 'e.g. "Rain jacket", not "clothes".' },
-          category: { type: 'string', enum: [...PACKING_CATEGORIES] },
-          quantity: { type: 'integer' },
-        },
-        required: ['label', 'category', 'quantity'],
-      },
-    },
-  },
-  required: ['items'],
-};
-
 @Injectable()
 export class PackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
-    private readonly ai: AnthropicService,
   ) {}
 
   async list(tripId: string, userId: string): Promise<PackingItemDto[]> {
@@ -107,59 +83,6 @@ export class PackingService {
     if (!existing) throw new NotFoundException('Packing item not found.');
     await this.prisma.packingItem.delete({ where: { id: itemId } });
   }
-
-  /**
-   * Seeds the list from the trip's shape. Only removes previous `ai` items — anything the
-   * traveller added or ticked off survives a re-run.
-   */
-  async generate(tripId: string, userId: string): Promise<PackingItemDto[]> {
-    const trip = await this.trips.assertEditable(tripId, userId);
-    const nights = Math.max(
-      1,
-      Math.round((trip.endDate.getTime() - trip.startDate.getTime()) / 86_400_000),
-    );
-
-    const raw = await this.ai.runToolCall({
-      system:
-        'You build practical packing lists. Be specific to the destination, season, and length ' +
-        'of the trip. Do not pad the list with obvious filler. Never suggest prohibited items.',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            `Destination: ${trip.destination}`,
-            `Dates: ${trip.startDate.toISOString().slice(0, 10)} to ${trip.endDate.toISOString().slice(0, 10)} (${nights} nights)`,
-            `Travellers: ${trip.travelers}`,
-            '',
-            'Build the packing list for one traveller.',
-          ].join('\n'),
-        },
-      ],
-      toolName: PACKING_TOOL_NAME,
-      toolDescription: 'Save the packing list. This is the only way to return it.',
-      toolSchema: PACKING_TOOL_SCHEMA,
-    });
-
-    const suggestions = parseSuggestions(raw);
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.packingItem.deleteMany({ where: { tripId, source: 'ai', isPacked: false } });
-      const offset = await tx.packingItem.count({ where: { tripId } });
-
-      await tx.packingItem.createMany({
-        data: suggestions.map((item, index) => ({
-          tripId,
-          label: item.label,
-          category: item.category,
-          quantity: item.quantity,
-          source: 'ai',
-          position: offset + index,
-        })),
-      });
-    });
-
-    return this.list(tripId, userId);
-  }
 }
 
 function toDto(item: {
@@ -180,30 +103,4 @@ function toDto(item: {
     source: item.source === 'ai' ? 'ai' : 'user',
     position: item.position,
   };
-}
-
-function parseSuggestions(
-  raw: unknown,
-): { label: string; category: PackingCategory; quantity: number }[] {
-  if (typeof raw !== 'object' || raw === null) return [];
-  const items = (raw as { items?: unknown }).items;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .map((entry) => {
-      if (typeof entry !== 'object' || entry === null) return null;
-      const record = entry as Record<string, unknown>;
-      const label = typeof record.label === 'string' ? record.label.trim() : '';
-      if (!label) return null;
-
-      const category = PACKING_CATEGORIES.find((c) => c === record.category) ?? 'other';
-      const quantity =
-        typeof record.quantity === 'number' && record.quantity > 0
-          ? Math.min(99, Math.round(record.quantity))
-          : 1;
-
-      return { label, category, quantity };
-    })
-    .filter((i): i is { label: string; category: PackingCategory; quantity: number } => i !== null)
-    .slice(0, 30);
 }

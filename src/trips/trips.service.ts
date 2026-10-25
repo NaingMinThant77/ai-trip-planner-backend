@@ -80,20 +80,46 @@ export class TripsService {
     const nextEnd = dto.endDate ?? existing.endDate.toISOString();
     const { startDate, endDate } = this.assertValidDates(nextStart, nextEnd);
 
-    const trip = await this.prisma.trip.update({
-      where: { id },
-      data: {
-        title: dto.title ?? undefined,
-        source: dto.source ?? undefined,
-        destination: dto.destination ?? undefined,
-        startDate,
-        endDate,
-        travelers: dto.travelers ?? undefined,
-        coverImageUrl: dto.coverImageUrl ?? undefined,
-        coverImagePublicId: dto.coverImagePublicId ?? undefined,
-        notes: dto.notes ?? undefined,
-      },
+    const trip = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.trip.update({
+        where: { id },
+        data: {
+          title: dto.title ?? undefined,
+          source: dto.source ?? undefined,
+          destination: dto.destination ?? undefined,
+          startDate,
+          endDate,
+          travelers: dto.travelers ?? undefined,
+          coverImageUrl: dto.coverImageUrl ?? undefined,
+          coverImagePublicId: dto.coverImagePublicId ?? undefined,
+          notes: dto.notes ?? undefined,
+        },
+      });
+
+      // Days carry their own calendar date, so moving the trip has to move them too —
+      // otherwise "Day 1" would keep showing the old start date. Days past a shortened
+      // end date are kept (they hold the traveller's plans) rather than silently deleted.
+      if (startDate.getTime() !== existing.startDate.getTime()) {
+        for (const day of existing.days) {
+          await tx.tripDay.update({
+            where: { id: day.id },
+            data: { date: new Date(startDate.getTime() + (day.dayNumber - 1) * MS_PER_DAY) },
+          });
+        }
+      }
+
+      return updated;
     });
+
+    // A replaced cover would otherwise stay in Cloudinary forever. Done after the write so a
+    // failed update never deletes the image the trip still points at.
+    if (
+      dto.coverImagePublicId &&
+      existing.coverImagePublicId &&
+      dto.coverImagePublicId !== existing.coverImagePublicId
+    ) {
+      await this.cloudinary.deleteImage(existing.coverImagePublicId);
+    }
 
     return toTripDto(trip);
   }
@@ -160,7 +186,7 @@ export class TripsService {
     return trip;
   }
 
-  private assertValidDates(start: string, end: string): { startDate: Date; endDate: Date } {
+  assertValidDates(start: string, end: string): { startDate: Date; endDate: Date } {
     const startDate = new Date(start);
     const endDate = new Date(end);
 

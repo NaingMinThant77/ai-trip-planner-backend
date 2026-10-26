@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { GUIDES, GuideItemSeed } from './guides';
 
 const prisma = new PrismaClient();
 
@@ -165,6 +166,25 @@ const destinations = [
     dailyBudgetText: 'around $50-120 per person per day',
   },
 ];
+
+/**
+ * Editorial "how popular is this right now" score, 0-100. ExploreService.trending ranks on it
+ * (plus real trips planned), so the Home Explore tab has a believable top 3 before any traffic.
+ */
+const POPULARITY: Record<string, number> = {
+  kyoto: 95,
+  lisbon: 88,
+  istanbul: 84,
+  'mexico-city': 80,
+  rome: 78,
+  marrakesh: 72,
+  hanoi: 70,
+  reykjavik: 66,
+  queenstown: 62,
+  'cape-town': 60,
+  vancouver: 55,
+  'buenos-aires': 50,
+};
 
 /**
  * Sample trips seeded for one demo account so the mobile app has more than one trip to render
@@ -530,8 +550,74 @@ const sampleTrips = [
   },
 ];
 
+
+/**
+ * Resolves an English Wikipedia article title to a Wikimedia Commons photo URL. Run at seed time
+ * only, so the app has no runtime dependency on Wikipedia. Returns null on any failure — a guide
+ * item without a photo still renders.
+ */
+async function wikiImage(title: string): Promise<string | null> {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+  // Wikipedia rate-limits bursts with 429; back off and retry rather than silently losing photos.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await sleep(250);
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'ai-trip-planner-seed/0.1 (student project)' },
+      });
+      if (response.status === 429 || response.status >= 500) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      if (!response.ok) return null;
+      const body = (await response.json()) as { thumbnail?: { source?: string } };
+      const source = body.thumbnail?.source;
+      // The summary thumbnail is 330px; Wikimedia serves 960px for any thumb URL.
+      return source ? source.replace(/\/\d+px-/, '/960px-') : null;
+    } catch {
+      await sleep(2000 * (attempt + 1));
+    }
+  }
+  return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withImages(items: GuideItemSeed[]) {
+  const out: { title: string; blurb: string; imageUrl: string | null }[] = [];
+  for (const item of items) {
+    out.push({
+      title: item.title,
+      blurb: item.blurb,
+      imageUrl: item.wiki ? await wikiImage(item.wiki) : null,
+    });
+  }
+  return out;
+}
+
+async function buildGuide(slug: string): Promise<{ guide: string; heroImageUrl: string | null }> {
+  const seed = GUIDES[slug];
+  if (!seed) return { guide: '{}', heroImageUrl: null };
+
+  const guide = {
+    intro: seed.intro,
+    places: await withImages(seed.places),
+    restaurants: await withImages(seed.restaurants),
+    culture: await withImages(seed.culture),
+    food: await withImages(seed.food),
+    stay: await withImages(seed.stay),
+    packing: seed.packing,
+    photoCredit: 'Photos from Wikimedia Commons, via Wikipedia',
+  };
+
+  return { guide: JSON.stringify(guide), heroImageUrl: await wikiImage(seed.wiki) };
+}
+
 async function main(): Promise<void> {
   for (const destination of destinations) {
+    const { guide, heroImageUrl } = await buildGuide(destination.slug);
     const data = {
       name: destination.name,
       country: destination.country,
@@ -542,7 +628,9 @@ async function main(): Promise<void> {
       latitude: destination.latitude,
       longitude: destination.longitude,
       dailyBudgetText: destination.dailyBudgetText,
-      heroImageUrl: null,
+      popularity: POPULARITY[destination.slug] ?? 0,
+      guide,
+      heroImageUrl,
     };
 
     await prisma.destination.upsert({
@@ -553,6 +641,11 @@ async function main(): Promise<void> {
   }
 
   console.log(`Seeded ${destinations.length} destinations.`);
+
+  if (process.env.SEED_SKIP_SAMPLE_TRIPS === 'true') {
+    console.log('Skipped sample trips (SEED_SKIP_SAMPLE_TRIPS=true).');
+    return;
+  }
 
   const sampleTripUser = await prisma.user.findUnique({
     where: { email: SAMPLE_TRIP_USER_EMAIL },

@@ -3,7 +3,13 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
 import { ExploreQueryDto } from './dto/explore-query.dto';
-import { DestinationDto, ExploreService, SuggestionDto } from './explore.service';
+import {
+  DestinationDetailDto,
+  DestinationDto,
+  ExploreService,
+  SuggestionDto,
+  TrendingDto,
+} from './explore.service';
 
 @Controller('explore')
 @UseGuards(JwtAuthGuard)
@@ -26,8 +32,14 @@ export class ExploreController {
     return this.explore.suggestFor(user.id);
   }
 
+  /** Most-planned destinations over the last 30 days; the same list for every traveller. */
+  @Get('trending')
+  async trending(): Promise<TrendingDto[]> {
+    return this.explore.trending();
+  }
+
   @Get('destinations/:slug')
-  async getBySlug(@Param('slug') slug: string): Promise<DestinationDto> {
+  async getBySlug(@Param('slug') slug: string): Promise<DestinationDetailDto> {
     return this.explore.getBySlug(slug);
   }
 }

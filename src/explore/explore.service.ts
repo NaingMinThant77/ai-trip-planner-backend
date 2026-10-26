@@ -23,6 +23,33 @@ export type SuggestionDto = DestinationDto & {
   score: number;
 };
 
+export type GuideItemDto = { title: string; blurb: string; imageUrl: string | null };
+
+/** The blog-style guide behind the destination screen. Editorial and indicative: no prices or hours. */
+export type DestinationGuideDto = {
+  intro: string;
+  places: GuideItemDto[];
+  restaurants: GuideItemDto[];
+  culture: GuideItemDto[];
+  food: GuideItemDto[];
+  stay: GuideItemDto[];
+  packing: string[];
+  photoCredit: string;
+};
+
+export type DestinationDetailDto = DestinationDto & { guide: DestinationGuideDto };
+
+export type TrendingDto = DestinationDto & {
+  /** Trips created for this place in the last 30 days, across all travellers. */
+  tripCount: number;
+  inSeason: boolean;
+};
+
+const TRENDING_WINDOW_DAYS = 30;
+const TRENDING_LIMIT = 3;
+/** Each real trip in the window is worth this many points of seeded popularity. */
+const TRIP_WEIGHT = 10;
+
 @Injectable()
 export class ExploreService {
   constructor(private readonly prisma: PrismaService) {}
@@ -48,10 +75,10 @@ export class ExploreService {
     return destinations.map(toDto);
   }
 
-  async getBySlug(slug: string): Promise<DestinationDto> {
+  async getBySlug(slug: string): Promise<DestinationDetailDto> {
     const destination = await this.prisma.destination.findUnique({ where: { slug } });
     if (!destination) throw new NotFoundException('Destination not found.');
-    return toDto(destination);
+    return { ...toDto(destination), guide: parseGuide(destination.guide) };
   }
 
   async listRegions(): Promise<string[]> {
@@ -61,6 +88,49 @@ export class ExploreService {
       orderBy: { region: 'asc' },
     });
     return rows.map((row) => row.region);
+  }
+
+  /**
+   * The top three places right now. Score = seeded `popularity` + real trips created in the last
+   * 30 days (grouped by destination name) x TRIP_WEIGHT, so a brand-new install still shows a
+   * sensible list and real demand takes over as people plan. Ties fall back to in-season, then name.
+   */
+  async trending(limit = TRENDING_LIMIT): Promise<TrendingDto[]> {
+    const since = new Date(Date.now() - TRENDING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const [grouped, destinations] = await Promise.all([
+      this.prisma.trip.groupBy({
+        by: ['destination'],
+        where: { createdAt: { gte: since } },
+        _count: { _all: true },
+      }),
+      this.prisma.destination.findMany(),
+    ]);
+
+    const counts = new Map<string, number>();
+    for (const row of grouped) {
+      const key = row.destination.trim().toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + row._count._all);
+    }
+
+    const currentMonth = new Date().getMonth() + 1;
+
+    return destinations
+      .map((destination) => {
+        const dto = toDto(destination);
+        const tripCount = counts.get(destination.name.toLowerCase()) ?? 0;
+        return {
+          dto: { ...dto, tripCount, inSeason: dto.bestMonths.includes(currentMonth) },
+          score: destination.popularity + tripCount * TRIP_WEIGHT,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(b.dto.inSeason) - Number(a.dto.inSeason) ||
+          a.dto.name.localeCompare(b.dto.name),
+      )
+      .slice(0, limit)
+      .map((entry) => entry.dto);
   }
 
   /**
@@ -165,4 +235,56 @@ function parseJsonNumbers(raw: string): number[] {
   } catch {
     return [];
   }
+}
+
+const EMPTY_GUIDE: DestinationGuideDto = {
+  intro: '',
+  places: [],
+  restaurants: [],
+  culture: [],
+  food: [],
+  stay: [],
+  packing: [],
+  photoCredit: '',
+};
+
+/** The guide column is stored JSON, so it is validated on the way out rather than trusted. */
+export function parseGuide(raw: string): DestinationGuideDto {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return EMPTY_GUIDE;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return EMPTY_GUIDE;
+  const record = parsed as Record<string, unknown>;
+
+  return {
+    intro: typeof record.intro === 'string' ? record.intro : '',
+    places: parseGuideItems(record.places),
+    restaurants: parseGuideItems(record.restaurants),
+    culture: parseGuideItems(record.culture),
+    food: parseGuideItems(record.food),
+    stay: parseGuideItems(record.stay),
+    packing: Array.isArray(record.packing)
+      ? record.packing.filter((item): item is string => typeof item === 'string')
+      : [],
+    photoCredit: typeof record.photoCredit === 'string' ? record.photoCredit : '',
+  };
+}
+
+function parseGuideItems(value: unknown): GuideItemDto[] {
+  if (!Array.isArray(value)) return [];
+  const items: GuideItemDto[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const item = entry as Record<string, unknown>;
+    if (typeof item.title !== 'string' || typeof item.blurb !== 'string') continue;
+    items.push({
+      title: item.title,
+      blurb: item.blurb,
+      imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl : null,
+    });
+  }
+  return items;
 }

@@ -289,6 +289,11 @@ model Destination {
   longitude    Float
   /// Rough daily spend per person, indicative only.
   dailyBudgetText String?
+  /// Seeded editorial score (0-100) that ranks Trending; real trips planned add to it.
+  popularity   Int    @default(0)
+  /// JSON-encoded DestinationGuide (intro, places, restaurants, culture, food, stay, packing) with
+  /// resolved photo URLs. Seeded from prisma/guides.ts; parsed defensively by ExploreService.
+  guide        String @default("{}")
 
   @@index([region])
 }

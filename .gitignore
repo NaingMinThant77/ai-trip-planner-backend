@@ -4,7 +4,7 @@ coverage/
 *.log
 
 # Secrets — .env.example is the committed template
-# .env
+.env
 .env.local
 .env.*.local
 .env.backup

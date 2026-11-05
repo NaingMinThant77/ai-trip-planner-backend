@@ -8,7 +8,7 @@ NestJS REST + WebSocket API for the AI Trip Planner app.
 - **Prisma 6** with PostgreSQL (Supabase) — SQLite works for local/offline use
 - **Auth:** JWT (Passport) with email/password and optional Google sign-in
 - **AI:** Google Gemini (`@google/genai`) for the streaming chat agent
-- **Media:** Cloudinary for profile photos (signed server-side uploads)
+- **Media:** Cloudinary for all images — avatars, trip covers and trip photos (signed server-side uploads)
 
 ## Project structure
 
@@ -66,7 +66,7 @@ See [.env.example](.env.example) for full comments. `.env` is gitignored — nev
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | Enables Google sign-in. Without them the server still boots. |
 | `OAUTH_PUBLIC_URL` | No | Base URL the device browser can reach; must match the Google console redirect URI (`<url>/api/auth/google/callback`). |
 | `OAUTH_ALLOWED_REDIRECTS` | Prod | Comma-separated app deep-link prefixes (e.g. `wayfarer://`). Must be set in production. |
-| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | No | Profile photo uploads. Without them uploads return 503. |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | No | All image uploads (avatars, trip covers, trip photos). Without them uploads return 503. |
 | `GEMINI_API_KEY` | No | Chat agent. Without it the chat shows a configuration error. |
 | `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | No | Primary model and quota-fallback models. |
 
@@ -100,7 +100,31 @@ Google only accepts `https://`, `http://localhost` or `http://127.0.0.1` redirec
 - **Android (USB/emulator):** keep `OAUTH_PUBLIC_URL=http://localhost:3000` and run `npm run oauth:bridge` from `frontend/` (`adb reverse`).
 - **Any device (incl. iPhone):** expose the backend over an https tunnel (e.g. `cloudflared tunnel --url http://localhost:3000`), set `OAUTH_PUBLIC_URL` to the tunnel URL, add `<tunnel>/api/auth/google/callback` in the Google console, and set `EXPO_PUBLIC_API_URL=<tunnel>/api` in `frontend/.env`.
 
+### Production (Render)
+
+Set these environment variables on the host, then redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `OAUTH_PUBLIC_URL` | `https://<service>.onrender.com` (no `/api`) |
+| `OAUTH_ALLOWED_REDIRECTS` | `wayfarer://` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From the Google OAuth client (type **Web application**) |
+
+In Google Cloud Console → Credentials → your Web application client:
+
+- **Authorized redirect URIs:** add `https://<service>.onrender.com/api/auth/google/callback` (keep the `http://localhost:3000/...` entry for development).
+- **Authorized JavaScript origins:** leave empty.
+- If the consent screen is in *Testing* mode, add every tester's account as a test user.
+
+The app's URL scheme (`wayfarer://`, set in `frontend/app.json`) must match `OAUTH_ALLOWED_REDIRECTS`, or the backend refuses to hand the session back to the app.
+
 The server prints the resolved `redirect_uri` at boot — check it first if Google reports `redirect_uri_mismatch`.
+
+## Deployment notes
+
+- Run on a host that keeps a long-lived process (Render, Railway, Fly.io). The chat uses Socket.IO, which does not work on serverless platforms such as Vercel.
+- Start command: `npx prisma migrate deploy && npm run start:prod`.
+- Trip photos are stored in Cloudinary; the local `uploads/` folder only serves legacy photos.
 
 ## Troubleshooting
 

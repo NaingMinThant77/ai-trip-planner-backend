@@ -14,7 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SafeUser } from '../users/users.service';
@@ -23,8 +23,6 @@ import {
   MAX_PHOTO_BYTES,
   PhotoDto,
   PhotosService,
-  UPLOAD_ROOT,
-  generateFileName,
   mimeTypeFor,
 } from './photos.service';
 
@@ -44,10 +42,7 @@ export class PhotosController {
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: UPLOAD_ROOT,
-        filename: (_req, file, cb) => cb(null, generateFileName(file.originalname)),
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: MAX_PHOTO_BYTES },
     }),
   )
@@ -75,7 +70,7 @@ export class PhotosController {
 }
 
 /**
- * Image bytes are served unauthenticated so <Image> can load them with a plain URL.
+ * Legacy photos (uploaded before the move to Cloudinary) are served unauthenticated so <Image> can load them with a plain URL.
  * File names are unguessable UUIDs, which is the same posture as a signed CDN path —
  * acceptable for trip photos, not acceptable for anything genuinely sensitive.
  */

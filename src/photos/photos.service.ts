@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ReadStream, createReadStream, existsSync, mkdirSync } from 'fs';
+import { ReadStream, createReadStream, existsSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { extname, join, resolve } from 'path';
-import { randomUUID } from 'crypto';
+import { CloudinaryService } from '../media/cloudinary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TripsService } from '../trips/trips.service';
 
@@ -21,6 +21,11 @@ const ALLOWED_MIME = new Map<string, string>([
  */
 function photoPath(fileName: string): string {
   return `/api/uploads/${fileName}`;
+}
+
+/** Cloudinary rows carry an absolute url; legacy rows fall back to the disk-serving route. */
+function photoUrl(photo: { url: string | null; fileName: string }): string {
+  return photo.url ?? photoPath(photo.fileName);
 }
 
 /** Content-Type for a stored file, so image loaders do not get application/octet-stream. */
@@ -47,11 +52,8 @@ export class PhotosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
-  ) {
-    if (!existsSync(UPLOAD_ROOT)) {
-      mkdirSync(UPLOAD_ROOT, { recursive: true });
-    }
-  }
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async list(tripId: string, userId: string): Promise<PhotoDto[]> {
     await this.trips.findAccessible(tripId, userId);
@@ -63,7 +65,7 @@ export class PhotosService {
 
     return photos.map((photo) => ({
       id: photo.id,
-      url: photoPath(photo.fileName),
+      url: photoUrl(photo),
       caption: photo.caption,
       width: photo.width,
       height: photo.height,
@@ -89,14 +91,15 @@ export class PhotosService {
       throw new BadRequestException('Images must be 10MB or smaller.');
     }
 
-    // multer's diskStorage already wrote the file under a generated name; keep that name.
-    const fileName = file.filename;
+    const uploaded = await this.cloudinary.uploadTripPhoto(file);
 
     const photo = await this.prisma.tripPhoto.create({
       data: {
         tripId,
         userId,
-        fileName,
+        fileName: uploaded.publicId,
+        url: uploaded.url,
+        publicId: uploaded.publicId,
         caption,
         sizeBytes: file.size,
         mimeType: file.mimetype,
@@ -106,7 +109,7 @@ export class PhotosService {
 
     return {
       id: photo.id,
-      url: photoPath(photo.fileName),
+      url: photoUrl(photo),
       caption: photo.caption,
       width: photo.width,
       height: photo.height,
@@ -124,10 +127,14 @@ export class PhotosService {
     await this.prisma.tripPhoto.delete({ where: { id: photoId } });
 
     // The row is the source of truth; a leftover file is untidy, not broken.
-    await unlink(join(UPLOAD_ROOT, photo.fileName)).catch(() => undefined);
+    if (photo.publicId) {
+      await this.cloudinary.deleteImage(photo.publicId);
+    } else {
+      await unlink(join(UPLOAD_ROOT, photo.fileName)).catch(() => undefined);
+    }
   }
 
-  /** Streams a stored image. `fileName` is validated to stop path traversal. */
+  /** Streams a legacy image still stored on local disk. `fileName` is validated to stop path traversal. */
   streamFile(fileName: string): ReadStream {
     if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(fileName)) {
       throw new BadRequestException('Invalid file name.');
@@ -141,10 +148,4 @@ export class PhotosService {
 
     return createReadStream(path);
   }
-}
-
-/** Used by multer's diskStorage to name incoming files. */
-export function generateFileName(originalName: string): string {
-  const ext = extname(originalName).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.jpg';
-  return `${randomUUID()}${ext}`;
 }

@@ -184,8 +184,13 @@ model TripPhoto {
   id        String   @id @default(cuid())
   tripId    String
   userId    String
-  /// Path relative to the uploads root. Served via GET /api/uploads/:fileName.
+  /// Legacy rows: path relative to the uploads root, served via GET /api/uploads/:fileName.
+  /// New rows: the Cloudinary public_id (kept only because the column is required).
   fileName  String
+  /// Cloudinary `secure_url`. Null for legacy rows that still live on local disk.
+  url       String?
+  /// Cloudinary `public_id`, needed to delete the image. Null for legacy rows.
+  publicId  String?
   caption   String?
   width     Int?
   height    Int?

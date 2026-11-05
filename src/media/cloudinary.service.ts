@@ -14,9 +14,11 @@ const API_BASE = 'https://api.cloudinary.com/v1_1';
 /** Everything the app uploads lands here, so an account can be cleaned up in one place. */
 const AVATAR_FOLDER = 'ai-trip-planner/avatars';
 const TRIP_COVER_FOLDER = 'ai-trip-planner/trip-covers';
+const TRIP_PHOTO_FOLDER = 'ai-trip-planner/trip-photos';
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 export const MAX_TRIP_COVER_BYTES = 8 * 1024 * 1024;
+export const MAX_TRIP_PHOTO_BYTES = 10 * 1024 * 1024;
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 
@@ -66,6 +68,20 @@ export class CloudinaryService {
       publicIdPrefix: 'trip-cover',
       maxBytes: MAX_TRIP_COVER_BYTES,
       tooLargeMessage: 'That image is larger than 8 MB.',
+    });
+  }
+
+  /** A photo added to a trip's Photos tab. */
+  async uploadTripPhoto(file: {
+    buffer: Buffer;
+    mimetype: string;
+    size: number;
+  }): Promise<UploadedImage> {
+    return this.uploadImage(file, {
+      folder: TRIP_PHOTO_FOLDER,
+      publicIdPrefix: 'trip-photo',
+      maxBytes: MAX_TRIP_PHOTO_BYTES,
+      tooLargeMessage: 'Images must be 10MB or smaller.',
     });
   }
 

@@ -65,7 +65,7 @@ See [.env.example](.env.example) for full comments. `.env` is gitignored — nev
 | `PORT` | No | Defaults to `3000`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | Enables Google sign-in. Without them the server still boots. |
 | `OAUTH_PUBLIC_URL` | No | Base URL the device browser can reach; must match the Google console redirect URI (`<url>/api/auth/google/callback`). |
-| `OAUTH_ALLOWED_REDIRECTS` | Prod | Comma-separated app deep-link prefixes (e.g. `aitripplanner://`). Must be set in production. |
+| `OAUTH_ALLOWED_REDIRECTS` | Prod | Comma-separated app deep-link prefixes (e.g. `wayfarer://`). Must be set in production. |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | No | Profile photo uploads. Without them uploads return 503. |
 | `GEMINI_API_KEY` | No | Chat agent. Without it the chat shows a configuration error. |
 | `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | No | Primary model and quota-fallback models. |

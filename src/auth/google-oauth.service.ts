@@ -176,7 +176,7 @@ export class GoogleOAuthService {
         .filter((entry) => entry.length > 0);
     }
 
-    const prefixes = ['aitripplanner://'];
+    const prefixes = ['wayfarer://'];
 
     // Expo Go serves the app from `exp://<lan-ip>:8081`, which changes with the network, so
     // it cannot be a fixed default. Dev only — production must set OAUTH_ALLOWED_REDIRECTS.

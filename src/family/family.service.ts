@@ -8,6 +8,8 @@ export type FamilyMemberDto = {
   userId: string;
   name: string;
   email: string;
+  /** Cloudinary URL; null means the client renders initials. */
+  avatarUrl: string | null;
   addedAt: string;
 };
 
@@ -28,8 +30,8 @@ export class FamilyService {
       where: { OR: [{ ownerId: userId }, { memberId: userId }] },
       orderBy: { addedAt: 'asc' },
       include: {
-        owner: { select: { id: true, name: true, email: true } },
-        member: { select: { id: true, name: true, email: true } },
+        owner: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        member: { select: { id: true, name: true, email: true, avatarUrl: true } },
       },
     });
 
@@ -40,6 +42,7 @@ export class FamilyService {
         userId: other.id,
         name: other.name,
         email: other.email,
+        avatarUrl: other.avatarUrl,
         addedAt: row.addedAt.toISOString(),
       };
     });
@@ -73,6 +76,7 @@ export class FamilyService {
       userId: member.id,
       name: member.name,
       email: member.email,
+      avatarUrl: member.avatarUrl,
       addedAt: row.addedAt.toISOString(),
     };
   }

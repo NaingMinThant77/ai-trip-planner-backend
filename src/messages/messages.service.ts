@@ -61,9 +61,13 @@ export class MessagesService {
       where: { recipientId: userId, readAt: null },
       _count: { _all: true },
     });
+    // Only people still in the friend list count: after an unfriend their old unread
+    // messages stay in the table but must not keep the badge lit.
+    const friends = new Set((await this.family.list(userId)).map((member) => member.userId));
     const byPeer: Record<string, number> = {};
     let total = 0;
     for (const group of groups) {
+      if (!friends.has(group.senderId)) continue;
       byPeer[group.senderId] = group._count._all;
       total += group._count._all;
     }

@@ -20,6 +20,8 @@ export type UserProfile = SafeUser & {
   interests: string[];
   /** Always present on the way out — minted on first read if the column is still null. */
   inviteCode: string;
+  /** False for Google-only accounts: the client shows "set a password" instead of "change". */
+  hasPassword: boolean;
 };
 
 const safeUserSelect = {
@@ -35,6 +37,7 @@ const profileSelect = {
   homeCity: true,
   interests: true,
   inviteCode: true,
+  passwordHash: true,
 } as const;
 
 /** A retry means a code collision, not a bad request. Three is already generous at 4.8e8 codes. */
@@ -116,10 +119,12 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id }, select: profileSelect });
     if (!user) return null;
 
+    const { passwordHash, ...rest } = user;
     return {
-      ...user,
+      ...rest,
       interests: parseInterests(user.interests),
       inviteCode: user.inviteCode ?? (await this.ensureInviteCode(id)),
+      hasPassword: passwordHash !== null,
     };
   }
 
@@ -149,10 +154,12 @@ export class UsersService {
       select: profileSelect,
     });
 
+    const { passwordHash, ...rest } = user;
     return {
-      ...user,
+      ...rest,
       interests: parseInterests(user.interests),
       inviteCode: user.inviteCode ?? (await this.ensureInviteCode(id)),
+      hasPassword: passwordHash !== null,
     };
   }
 

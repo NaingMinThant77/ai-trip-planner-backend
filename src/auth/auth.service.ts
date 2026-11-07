@@ -94,12 +94,17 @@ export class AuthService {
     if (!record) throw new UnauthorizedException('That account no longer exists.');
 
     if (record.passwordHash === null) {
-      // Nothing to compare against. Setting a first password here would turn a Google-only
-      // account into one that can also be reached with a password, which is a different
-      // feature (and needs a verified-email step to be safe).
-      throw new BadRequestException(
-        'That account signs in with Google, so it has no password to change.',
+      // Google-only account: there is nothing to compare against, so this sets the first
+      // password. The caller already holds a valid JWT, and Google verified the email.
+      await this.users.updatePasswordHash(
+        userId,
+        await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS),
       );
+      return;
+    }
+
+    if (!dto.currentPassword) {
+      throw new BadRequestException('Enter your current password.');
     }
 
     const matches = await bcrypt.compare(dto.currentPassword, record.passwordHash);
